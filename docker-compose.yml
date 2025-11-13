@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: openwebui
+    ports:
+      - "3000:8080"
+    volumes:
+      # Persistent data storage
+      - openwebui-data:/app/backend/data
+      
+      # Mount the Anthropic pipe into the pipelines directory
+      - ./Anthropic_pipe_V1.py:/app/backend/data/pipelines/Anthropic_pipe_V1.py:ro
+    
+    environment:
+      # Anthropic API Key - REQUIRED for the pipe to work
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      
+      # Optional: Configure OpenWebUI settings
+      - WEBUI_NAME=OpenWebUI with Anthropic
+      - ENABLE_OLLAMA_API=false
+      - ENABLE_OPENAI_API=true
+      
+      # Optional: Additional environment variables
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # - WEBUI_AUTH=true
+      # - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+    
+    restart: unless-stopped
+    
+    # Health check to ensure the service is running
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  openwebui-data:
+    driver: local

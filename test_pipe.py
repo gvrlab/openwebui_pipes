@@ -7,6 +7,7 @@ import os
 import sys
 import asyncio
 import logging
+import types
 from typing import List, Dict, Tuple
 from pathlib import Path
 
@@ -29,7 +30,7 @@ logging.basicConfig(
 )
 
 # Mock the Open WebUI dependency
-def mock_pop_system_message(messages: List[Dict]) -> Tuple[str, List[Dict]]:
+def mock_pop_system_message(messages: List[Dict], *args, **kwargs) -> Tuple[str, List[Dict]]:
     """
     Mock implementation of open_webui.utils.misc.pop_system_message
     Extracts system message from messages list
@@ -45,12 +46,16 @@ def mock_pop_system_message(messages: List[Dict]) -> Tuple[str, List[Dict]]:
     
     return system_message, filtered_messages
 
-# Inject the mock into sys.modules before importing the pipe
-sys.modules['open_webui'] = type('Module', (), {})()
-sys.modules['open_webui.utils'] = type('Module', (), {})()
-sys.modules['open_webui.utils.misc'] = type('Module', (), {
-    'pop_system_message': mock_pop_system_message
-})()
+# Create proper mock modules using types.ModuleType
+open_webui = types.ModuleType('open_webui')
+open_webui.utils = types.ModuleType('open_webui.utils')
+open_webui.utils.misc = types.ModuleType('open_webui.utils.misc')
+open_webui.utils.misc.pop_system_message = mock_pop_system_message
+
+# Inject the mock modules into sys.modules
+sys.modules['open_webui'] = open_webui
+sys.modules['open_webui.utils'] = open_webui.utils
+sys.modules['open_webui.utils.misc'] = open_webui.utils.misc
 
 # Now import the pipe
 from Anthropic_pipe_V1 import Pipe
@@ -76,7 +81,7 @@ async def test_model_listing():
         pipe = Pipe()
         models = pipe.pipes()
         
-        print(f"✓ Successfully retrieved {len(models)} models")
+        print(f"[OK] Successfully retrieved {len(models)} models")
         print("\nAvailable models:")
         for model in models[:5]:  # Show first 5
             print(f"  - {model['name']}")
@@ -91,7 +96,7 @@ async def test_model_listing():
         
         return True
     except Exception as e:
-        print(f"✗ Failed: {str(e)}")
+        print(f"[ERROR] Failed: {str(e)}")
         logging.error(f"Model listing test failed", exc_info=True)
         return False
 
@@ -107,20 +112,20 @@ async def test_api_key_validation():
         
         # Test with empty API key
         if not pipe.valves.ANTHROPIC_API_KEY:
-            print("✓ Correctly detected missing API key")
+            print("[OK] Correctly detected missing API key")
             print("  Set ANTHROPIC_API_KEY environment variable to proceed with API tests")
             return True
         
         # Test API key format
         if pipe.valves.ANTHROPIC_API_KEY.startswith("sk-ant-"):
-            print("✓ API key format looks valid")
+            print("[OK] API key format looks valid")
             return True
         else:
-            print("⚠ Warning: API key doesn't match expected format (sk-ant-...)")
+            print("[WARN] Warning: API key doesn't match expected format (sk-ant-...)")
             return True
             
     except Exception as e:
-        print(f"✗ Failed: {str(e)}")
+        print(f"[ERROR] Failed: {str(e)}")
         logging.error(f"API key validation test failed", exc_info=True)
         return False
 
@@ -135,7 +140,7 @@ async def test_basic_completion():
     
     # Check if API key is set
     if not pipe.valves.ANTHROPIC_API_KEY:
-        print("⊘ Skipped: ANTHROPIC_API_KEY not set")
+        print("[SKIP] Skipped: ANTHROPIC_API_KEY not set")
         return None
     
     try:
@@ -156,7 +161,7 @@ async def test_basic_completion():
         print("Sending request to Anthropic API...")
         response = await pipe.pipe(body, event_emitter)
         
-        print(f"\n✓ Response received:")
+        print(f"\n[OK] Response received:")
         print(f"  {response[:200]}..." if len(response) > 200 else f"  {response}")
         
         if event_emitter.events:
@@ -165,7 +170,7 @@ async def test_basic_completion():
         return True
         
     except Exception as e:
-        print(f"\n✗ Failed: {str(e)}")
+        print(f"\n[ERROR] Failed: {str(e)}")
         logging.error(f"Basic completion test failed", exc_info=True)
         return False
 
@@ -180,7 +185,7 @@ async def test_streaming_completion():
     
     # Check if API key is set
     if not pipe.valves.ANTHROPIC_API_KEY:
-        print("⊘ Skipped: ANTHROPIC_API_KEY not set")
+        print("[SKIP] Skipped: ANTHROPIC_API_KEY not set")
         return None
     
     try:
@@ -203,17 +208,24 @@ async def test_streaming_completion():
         print("-" * 60)
         
         response_chunks = []
-        async for chunk in pipe.pipe(body, event_emitter):
+        stream = await pipe.pipe(body, event_emitter)
+        
+        # Check if we got an error string instead of a stream
+        if isinstance(stream, str):
+            print(f"\n[ERROR] Got error instead of stream: {stream[:200]}")
+            return False
+        
+        async for chunk in stream:
             print(chunk, end='', flush=True)
             response_chunks.append(chunk)
         
         print("\n" + "-" * 60)
-        print(f"\n✓ Received {len(response_chunks)} chunks")
+        print(f"\n[OK] Received {len(response_chunks)} chunks")
         
         return True
         
     except Exception as e:
-        print(f"\n✗ Failed: {str(e)}")
+        print(f"\n[ERROR] Failed: {str(e)}")
         logging.error(f"Streaming completion test failed", exc_info=True)
         return False
 
@@ -228,7 +240,7 @@ async def test_thinking_mode():
     
     # Check if API key is set
     if not pipe.valves.ANTHROPIC_API_KEY:
-        print("⊘ Skipped: ANTHROPIC_API_KEY not set")
+        print("[SKIP] Skipped: ANTHROPIC_API_KEY not set")
         return None
     
     try:
@@ -250,32 +262,206 @@ async def test_thinking_mode():
         response = await pipe.pipe(body, event_emitter)
         
         if "<thinking>" in response:
-            print("✓ Thinking mode activated successfully")
+            print("[OK] Thinking mode activated successfully")
             print(f"\n  Response preview:")
             print(f"  {response[:300]}...")
         else:
-            print("⚠ Response received but no thinking tags found")
+            print("[WARN] Response received but no thinking tags found")
             print(f"  {response[:200]}...")
         
         return True
         
     except Exception as e:
-        print(f"\n✗ Failed: {str(e)}")
+        print(f"\n[ERROR] Failed: {str(e)}")
         logging.error(f"Thinking mode test failed", exc_info=True)
         return False
 
 
-async def test_error_handling():
-    """Test 6: Error handling with invalid model"""
+async def test_pdf_processing():
+    """Test 6: PDF Processing"""
     print("\n" + "="*60)
-    print("TEST 6: Error Handling")
+    print("TEST 6: PDF Processing")
     print("="*60)
     
     pipe = Pipe()
     
     # Check if API key is set
     if not pipe.valves.ANTHROPIC_API_KEY:
-        print("⊘ Skipped: ANTHROPIC_API_KEY not set")
+        print("[SKIP] Skipped: ANTHROPIC_API_KEY not set")
+        return None
+    
+    try:
+        # Check if PDF file exists
+        pdf_path = Path(__file__).parent / 'mocdocs' / 'US8295471.pdf'
+        if not pdf_path.exists():
+            print(f"[SKIP] Skipped: PDF file not found at {pdf_path}")
+            return None
+        
+        print(f"[OK] Found PDF file: {pdf_path.name} ({pdf_path.stat().st_size / 1024:.1f} KB)")
+        
+        # Read PDF and convert to base64
+        with open(pdf_path, 'rb') as f:
+            pdf_bytes = f.read()
+        
+        import base64
+        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+        pdf_data_url = f"data:application/pdf;base64,{pdf_base64}"
+        
+        print(f"[OK] PDF encoded (size: {len(pdf_base64)} chars)")
+        
+        event_emitter = TestEventEmitter()
+        
+        # Test with a PDF-supporting model
+        body = {
+            "model": "anthropic/claude-3-7-sonnet-20250219",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "pdf_url",
+                            "pdf_url": {
+                                "url": pdf_data_url
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Please analyze this PDF document. What is the title and main subject of this patent document?"
+                        }
+                    ]
+                }
+            ],
+            "stream": False,
+            "max_tokens": 1000
+        }
+        
+        print("\nSending PDF to Anthropic API for analysis...")
+        print("This may take a moment as the PDF is being processed...")
+        
+        response = await pipe.pipe(body, event_emitter)
+        
+        print(f"\n[OK] Response received:")
+        print("-" * 60)
+        if len(response) > 500:
+            print(f"{response[:500]}...")
+            print(f"\n[Response truncated. Full length: {len(response)} chars]")
+        else:
+            print(response)
+        print("-" * 60)
+        
+        # Check if response seems valid
+        if len(response) > 50 and not response.startswith("Error"):
+            print("\n[OK] PDF processing appears successful!")
+            return True
+        else:
+            print("\n[WARN] Response might indicate an issue")
+            return False
+        
+    except Exception as e:
+        print(f"\n[ERROR] Failed: {str(e)}")
+        logging.error(f"PDF processing test failed", exc_info=True)
+        return False
+
+
+async def test_pdf_streaming():
+    """Test 7: PDF Processing with Streaming"""
+    print("\n" + "="*60)
+    print("TEST 7: PDF Processing (Streaming)")
+    print("="*60)
+    
+    pipe = Pipe()
+    
+    # Check if API key is set
+    if not pipe.valves.ANTHROPIC_API_KEY:
+        print("[SKIP] Skipped: ANTHROPIC_API_KEY not set")
+        return None
+    
+    try:
+        # Check if PDF file exists
+        pdf_path = Path(__file__).parent / 'mocdocs' / 'US8295471.pdf'
+        if not pdf_path.exists():
+            print(f"[SKIP] Skipped: PDF file not found at {pdf_path}")
+            return None
+        
+        print(f"[OK] Found PDF file: {pdf_path.name}")
+        
+        # Read PDF and convert to base64
+        with open(pdf_path, 'rb') as f:
+            pdf_bytes = f.read()
+        
+        import base64
+        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+        pdf_data_url = f"data:application/pdf;base64,{pdf_base64}"
+        
+        event_emitter = TestEventEmitter()
+        
+        body = {
+            "model": "anthropic/claude-3-7-sonnet-20250219",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "pdf_url",
+                            "pdf_url": {
+                                "url": pdf_data_url
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Briefly summarize the key claims of this patent in 2-3 sentences."
+                        }
+                    ]
+                }
+            ],
+            "stream": True,
+            "max_tokens": 500
+        }
+        
+        print("\nSending streaming request with PDF...")
+        print("\nStreaming response:")
+        print("-" * 60)
+        
+        response_chunks = []
+        stream = await pipe.pipe(body, event_emitter)
+        
+        # Check if we got an error string instead of a stream
+        if isinstance(stream, str):
+            print(f"\n[ERROR] Got error instead of stream: {stream[:200]}")
+            return False
+        
+        async for chunk in stream:
+            print(chunk, end='', flush=True)
+            response_chunks.append(chunk)
+        
+        print("\n" + "-" * 60)
+        print(f"\n[OK] Received {len(response_chunks)} chunks")
+        
+        full_response = ''.join(response_chunks)
+        if len(full_response) > 50 and not full_response.startswith("Error"):
+            print("[OK] Streaming PDF processing successful!")
+            return True
+        else:
+            print("[WARN] Response might indicate an issue")
+            return False
+        
+    except Exception as e:
+        print(f"\n[ERROR] Failed: {str(e)}")
+        logging.error(f"PDF streaming test failed", exc_info=True)
+        return False
+
+
+async def test_error_handling():
+    """Test 8: Error handling with invalid model"""
+    print("\n" + "="*60)
+    print("TEST 8: Error Handling")
+    print("="*60)
+    
+    pipe = Pipe()
+    
+    # Check if API key is set
+    if not pipe.valves.ANTHROPIC_API_KEY:
+        print("[SKIP] Skipped: ANTHROPIC_API_KEY not set")
         return None
     
     try:
@@ -297,16 +483,16 @@ async def test_error_handling():
         response = await pipe.pipe(body, event_emitter)
         
         if "error" in response.lower() or "Error" in response:
-            print("✓ Error handling working correctly")
+            print("[OK] Error handling working correctly")
             print(f"  Error message: {response[:200]}")
             return True
         else:
-            print("⚠ Unexpected response (expected error):")
+            print("[WARN] Unexpected response (expected error):")
             print(f"  {response[:200]}")
             return True
         
     except Exception as e:
-        print(f"✓ Exception caught as expected: {str(e)[:100]}")
+        print(f"[OK] Exception caught as expected: {str(e)[:100]}")
         return True
 
 
@@ -319,9 +505,9 @@ async def run_all_tests():
     # Check environment
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if api_key:
-        print(f"✓ ANTHROPIC_API_KEY is set (length: {len(api_key)})")
+        print(f"[OK] ANTHROPIC_API_KEY is set (length: {len(api_key)})")
     else:
-        print("⚠ ANTHROPIC_API_KEY not set - API tests will be skipped")
+        print("[WARN] ANTHROPIC_API_KEY not set - API tests will be skipped")
     
     results = {}
     
@@ -332,6 +518,8 @@ async def run_all_tests():
         ("Basic Completion", test_basic_completion),
         ("Streaming", test_streaming_completion),
         ("Thinking Mode", test_thinking_mode),
+        ("PDF Processing", test_pdf_processing),
+        ("PDF Streaming", test_pdf_streaming),
         ("Error Handling", test_error_handling),
     ]
     
@@ -353,7 +541,7 @@ async def run_all_tests():
     skipped = sum(1 for r in results.values() if r is None)
     
     for test_name, result in results.items():
-        status = "✓ PASS" if result is True else "⊘ SKIP" if result is None else "✗ FAIL"
+        status = "[PASS]" if result is True else "[SKIP]" if result is None else "[FAIL]"
         print(f"  {status}: {test_name}")
     
     print("\n" + "-"*60)
@@ -364,13 +552,13 @@ async def run_all_tests():
     print("="*60)
     
     if failed > 0:
-        print("\n⚠ Some tests failed. Check the logs above for details.")
+        print("\n[WARN] Some tests failed. Check the logs above for details.")
         return 1
     elif skipped > 0:
-        print("\n⚠ Some tests were skipped. Set ANTHROPIC_API_KEY to run all tests.")
+        print("\n[WARN] Some tests were skipped. Set ANTHROPIC_API_KEY to run all tests.")
         return 0
     else:
-        print("\n✓ All tests passed!")
+        print("\n[SUCCESS] All tests passed!")
         return 0
 
 

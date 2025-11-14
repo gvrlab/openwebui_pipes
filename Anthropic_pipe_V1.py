@@ -243,12 +243,33 @@ class Pipe:
 
         models = []
 
+        def _build_capability_suffix(model_name: str, has_thinking: bool = False) -> str:
+            """Build capability suffix for model name"""
+            capabilities = []
+            
+            # Check vision support
+            if model_name in self.VISION_SUPPORTED_MODELS:
+                capabilities.append("Vision")
+            
+            # Check PDF support
+            if model_name in self.SUPPORTED_PDF_MODELS:
+                capabilities.append("PDF")
+            
+            # Add thinking if applicable
+            if has_thinking:
+                capabilities.append("Thinking")
+            
+            if capabilities:
+                return f" [{', '.join(capabilities)}]"
+            return ""
+
         # Add standard models
         for name in standard_models:
+            capability_suffix = _build_capability_suffix(name, False)
             models.append(
                 {
                     "id": f"anthropic/{name}",
-                    "name": name,
+                    "name": f"{name}{capability_suffix}",
                     "context_length": self.MODEL_CONTEXT_LENGTH.get(name, 200000),
                     "supports_vision": name in self.VISION_SUPPORTED_MODELS,
                     "supports_thinking": False,
@@ -260,10 +281,11 @@ class Pipe:
         # Add hybrid models - both standard and thinking versions
         for name in hybrid_models:
             # Standard mode
+            standard_suffix = _build_capability_suffix(name, False)
             models.append(
                 {
                     "id": f"anthropic/{name}",
-                    "name": f"{name} (Standard)",
+                    "name": f"{name}{standard_suffix}",
                     "context_length": self.MODEL_CONTEXT_LENGTH.get(name, 200000),
                     "supports_vision": name in self.VISION_SUPPORTED_MODELS,
                     "supports_thinking": False,
@@ -274,10 +296,11 @@ class Pipe:
             )
 
             # Thinking mode
+            thinking_suffix = _build_capability_suffix(name, True)
             models.append(
                 {
                     "id": f"anthropic/{name}-thinking",
-                    "name": f"{name} (Extended Thinking)",
+                    "name": f"{name} (Thinking){thinking_suffix}",
                     "context_length": self.MODEL_CONTEXT_LENGTH.get(name, 200000),
                     "supports_vision": name in self.VISION_SUPPORTED_MODELS,
                     "supports_thinking": True,
